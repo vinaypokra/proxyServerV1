@@ -17,7 +17,7 @@ const error = (err, res) => {
   const { status = "", statusText = "", data = {} } = err?.response || {};
   const { error = "", message = "" } = data;
   console.log("error", err);
-  res.status(500).send(err);
+  res.status(status).send(message);
 };
 const arr = [
   "profile/CompositeProfile/V1/",
