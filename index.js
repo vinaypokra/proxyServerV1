@@ -38,22 +38,29 @@ app.use(async (req, res, next) => {
 
 // Microservice map
 const services = {
+  localGeneric: "http://localhost:8081/generic-service",
   "generic-service":
     "https://collections-mysql.pe-lab1.bdc-rancher.tecnotree.com/generic-service",
   ngb: "https://collections-mysql.pe-lab1.bdc-rancher.tecnotree.com/ngb",
   "collections-service":
     "https://collections-mysql.pe-lab1.bdc-rancher.tecnotree.com/collections-service",
+  // "generic-service":
+  //   "https://dcbs-dev.pe-lab1.bdc-rancher.tecnotree.com/generic-service",
+  // ngb: "https://pe-lab1-dev.tecnotree.com/ngb",
+  // "collections-service":
+  //   "https://dcbs-dev-ndb.pe-lab1.bdc-rancher.tecnotree.com/collections-service",
 };
 
 // Proxy handler
 app.use("/:serviceName/*", async (req, res) => {
   const serviceName = req.params.serviceName;
-
+  console.log({ req });
   if (!services[serviceName]) {
     return res.status(404).json({ error: "Unknown service" });
   }
+  const isTokenCall = req.params[0].includes("token");
 
-  const target = services[serviceName];
+  const target = isTokenCall ? services["localGeneric"] : services[serviceName];
   const forwardUrl = target + req.originalUrl.replace(`/${serviceName}`, "");
 
   console.log("===============================================");
@@ -61,7 +68,7 @@ app.use("/:serviceName/*", async (req, res) => {
   console.log("Service:", serviceName);
   console.log("Method:", req.method);
   console.log("URL:", req.originalUrl);
-  console.log("Headers:", req.headers);
+  // console.log("Headers:", req.headers);
   console.log("Body RAW:", req.rawBody?.toString());
   console.log("Forwarding to:", forwardUrl);
 
@@ -83,7 +90,7 @@ app.use("/:serviceName/*", async (req, res) => {
 
     console.log("⬅️ RESPONSE RECEIVED FROM MICROSERVICE");
     console.log("Status:", axiosResponse.status);
-    console.log("Headers:", axiosResponse.headers);
+    // console.log("Headers:", axiosResponse.headers);
     console.log("Body:", axiosResponse.data);
     console.log("===============================================");
 
