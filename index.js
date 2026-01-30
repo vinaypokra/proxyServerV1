@@ -13,12 +13,11 @@ app.use((req, res, next) => {
     "Access-Control-Allow-Methods",
     "GET,POST,PUT,PATCH,DELETE,OPTIONS",
   );
-
   if (req.method === "OPTIONS") return res.sendStatus(200);
   next();
 });
 
-/* ================= RAW BODY CAPTURE ================= */
+/* ================= RAW BODY ================= */
 app.use(async (req, res, next) => {
   if (req.method === "OPTIONS") return next();
   try {
@@ -26,157 +25,216 @@ app.use(async (req, res, next) => {
       encoding: req.headers["content-encoding"] ? null : "utf8",
     });
     next();
-  } catch (err) {
-    next(err);
+  } catch (e) {
+    next(e);
   }
 });
 
 /* ================= SERVICE MAPS ================= */
 
-const qc = {
-  "generic-service":
-    "https://collections-mysql.pe-lab1.bdc-rancher.tecnotree.com/generic-service",
-  ngb: "https://collections-mysql.pe-lab1.bdc-rancher.tecnotree.com/ngb",
-  "collections-service":
-    "https://collections-mysql.pe-lab1.bdc-rancher.tecnotree.com/collections-service",
+const ENVIRONMENTS = {
+  dev: {
+    "generic-service":
+      "https://dcbs-dev.pe-lab1.bdc-rancher.tecnotree.com/generic-service",
+    ngb: "https://pe-lab1-dev.tecnotree.com/ngb",
+    "collections-service":
+      "https://dcbs-dev-ndb.pe-lab1.bdc-rancher.tecnotree.com/collections-service",
+  },
+  qc: {
+    "generic-service":
+      "https://collections-mysql.pe-lab1.bdc-rancher.tecnotree.com/generic-service",
+    ngb: "https://collections-mysql.pe-lab1.bdc-rancher.tecnotree.com/ngb",
+    "collections-service":
+      "https://collections-mysql.pe-lab1.bdc-rancher.tecnotree.com/collections-service",
+  },
 };
 
-const dev = {
-  "generic-service":
-    "https://dcbs-dev.pe-lab1.bdc-rancher.tecnotree.com/generic-service",
-  ngb: "https://pe-lab1-dev.tecnotree.com/ngb",
-  "collections-service":
-    "https://dcbs-dev-ndb.pe-lab1.bdc-rancher.tecnotree.com/collections-service",
-};
+let activeEnv = "dev";
 
-const ENV_MAP = { dev, qc };
-let activeEnv = "dev"; // default
+/* ================= API LOG STORE ================= */
+const apiLogs = [];
+const MAX_LOGS = 100;
 
-/* ================= ENV TOGGLE API ================= */
+/* ================= ENV API ================= */
 
-app.get("/env", (req, res) => {
+app.get("/env", (req, res) => res.json({ activeEnv }));
+
+app.post("/env/:env", (req, res) => {
+  const env = req.params.env;
+  if (!ENVIRONMENTS[env]) return res.status(400).json({ error: "Invalid env" });
+  activeEnv = env;
+  console.log("🔥 ENV SWITCHED:", activeEnv);
   res.json({ activeEnv });
 });
 
-app.post("/env/:envName", (req, res) => {
-  const { envName } = req.params;
-  if (!ENV_MAP[envName]) return res.status(400).json({ error: "Invalid env" });
+/* ================= LOG API ================= */
+app.get("/logs", (req, res) => res.json(apiLogs));
 
-  activeEnv = envName;
-  console.log("🔥 ENV SWITCHED TO:", activeEnv);
-  res.json({ message: "Environment updated", activeEnv });
-});
-
-/* ================= WEB UI PAGE ================= */
-
+/* ================= UI ================= */
 app.get("/", (req, res) => {
   res.send(`
 <!DOCTYPE html>
 <html>
 <head>
-<title>Proxy Environment Switcher</title>
+<title>Proxy Monitor</title>
 <style>
-body { font-family: Arial; background:#0f172a; color:white; padding:40px; }
-button { padding:12px 20px; margin:10px; font-size:18px; border:none; border-radius:6px; cursor:pointer; }
-.dev { background:#22c55e; }
-.qc { background:#3b82f6; }
+body{font-family:Arial;background:#0f172a;color:white;padding:20px}
+button{padding:10px 15px;margin:5px;font-size:16px;border:0;border-radius:6px}
+.dev{background:#22c55e}.qc{background:#3b82f6}
+table{width:100%;border-collapse:collapse;margin-top:20px}
+td,th{border:1px solid #334155;padding:6px;font-size:12px}
+.copy{cursor:pointer;color:#38bdf8;font-size:18px}
+.copy:hover{color:#22c55e}
+
+/* URL column fixed width */
+.url-col {
+  max-width: 500px;
+  width: 500px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 </style>
 </head>
 <body>
-<h2>🚀 Proxy Environment Switcher</h2>
-<h3 id="status">Loading...</h3>
+
+<h2>Proxy Environment</h2>
+<h3 id="env">Loading...</h3>
 <button class="dev" onclick="setEnv('dev')">DEV</button>
 <button class="qc" onclick="setEnv('qc')">QC</button>
 
+<h2>Live API Logs</h2>
+<table>
+<thead>
+<tr>
+<th>Time</th>
+<th>Env</th>
+<th>Service</th>
+<th>Method</th>
+<th style="width:500px">URL</th>
+<th>Copy JSON</th>
+</tr>
+</thead>
+<tbody id="logs"></tbody>
+</table>
+
 <script>
-async function loadEnv() {
-  const res = await fetch('/env');
-  const data = await res.json();
-  document.getElementById("status").innerText =
-    "Current Environment: " + data.activeEnv.toUpperCase();
+async function refreshEnv(){
+  const r = await fetch('/env');
+  const d = await r.json();
+  document.getElementById('env').innerText = 'Current: ' + d.activeEnv.toUpperCase();
 }
 
-async function setEnv(env) {
-  await fetch('/env/' + env, { method:'POST' });
-  loadEnv();
+async function setEnv(e){
+  await fetch('/env/' + e, {method:'POST'});
+  refreshEnv();
 }
 
-loadEnv();
+function copyToClipboard(obj){
+  navigator.clipboard.writeText(JSON.stringify(obj, null, 2));
+  alert("Copied");
+}
+
+async function loadLogs(){
+  const r = await fetch('/logs');
+  const logs = await r.json();
+  const tbody = document.getElementById('logs');
+  tbody.innerHTML='';
+
+  logs.slice().reverse().forEach(l=>{
+    const copyObj = {
+      url: l.url,
+      type: l.method,
+      payload: l.request,
+      response: l.response
+    };
+
+    const tr = document.createElement("tr");
+
+    const safeCopy = JSON.stringify(copyObj).replace(/'/g, "&apos;");
+
+    tr.innerHTML = \`
+      <td>\${l.time}</td>
+      <td>\${l.env}</td>
+      <td>\${l.service}</td>
+      <td>\${l.method}</td>
+      <td class="url-col" title="\${l.url}">\${l.url}</td>
+      <td><span class="copy" onclick='copyToClipboard(\${safeCopy})'>📋</span></td>
+    \`;
+
+    tbody.appendChild(tr);
+  });
+}
+
+setInterval(loadLogs, 2000);
+refreshEnv();
 </script>
+
 </body>
 </html>
 `);
 });
 
-/* ================= PROXY HANDLER ================= */
+/* ================= PROXY ================= */
 
 app.use("/:serviceName/*", async (req, res) => {
   const serviceName = req.params.serviceName;
-  const services = ENV_MAP[activeEnv];
+  const wildcardPath = req.params[0] || ""; // ✅ SAFE
 
+  const services = ENVIRONMENTS[activeEnv];
   if (!services[serviceName]) {
     return res.status(404).json({ error: "Unknown service" });
   }
 
-  const isTokenCall = req.params[0].includes("token");
+  const isTokenCall = wildcardPath.includes("token");
   const target = isTokenCall
     ? "http://localhost:8081/generic-service"
     : services[serviceName];
 
   const forwardUrl = target + req.originalUrl.replace(`/${serviceName}`, "");
 
-  console.log("===============================================");
-  console.log("ENV:", activeEnv);
-  console.log("Service:", serviceName);
-  console.log("Forwarding:", forwardUrl);
+  let reqJson = null;
+  try {
+    reqJson = JSON.parse(req.rawBody);
+  } catch {}
 
   try {
-    const axiosResponse = await axios({
+    const resp = await axios({
       method: req.method,
       url: forwardUrl,
       data: req.rawBody,
       httpsAgent: new https.Agent({ rejectUnauthorized: false }),
-      headers: {
-        ...req.headers,
-        host: undefined,
-        "content-length": req.rawBody ? Buffer.byteLength(req.rawBody) : 0,
-      },
+      headers: { ...req.headers, host: undefined },
       validateStatus: () => true,
     });
 
-    // Remove backend CORS headers
-    delete axiosResponse.headers["access-control-allow-origin"];
-    delete axiosResponse.headers["access-control-allow-headers"];
-    delete axiosResponse.headers["access-control-allow-methods"];
-
-    // Force proxy CORS
-    res.set({
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-      "Access-Control-Allow-Headers": "*",
-    });
-
-    // Copy safe headers
-    for (const [k, v] of Object.entries(axiosResponse.headers)) {
-      if (
-        !["content-length", "transfer-encoding", "connection"].includes(
-          k.toLowerCase(),
-        )
-      ) {
-        res.setHeader(k, v);
-      }
+    let resJson = resp.data;
+    if (typeof resJson === "string") {
+      try {
+        resJson = JSON.parse(resJson);
+      } catch {}
     }
 
-    return res.status(axiosResponse.status).send(axiosResponse.data);
-  } catch (err) {
-    console.error("❌ Proxy Error:", err.message);
-    return res.status(500).json({ error: "Proxy error", details: err.message });
+    apiLogs.push({
+      time: new Date().toISOString(),
+      env: activeEnv,
+      service: serviceName,
+      method: req.method,
+      url: req.originalUrl,
+      request: reqJson,
+      response: resJson,
+    });
+    if (apiLogs.length > MAX_LOGS) apiLogs.shift();
+
+    res.set("Access-Control-Allow-Origin", "*");
+    return res.status(resp.status).send(resp.data);
+  } catch (e) {
+    console.error("Proxy error:", e.message);
+    res.status(500).json({ error: e.message });
   }
 });
 
-/* ================= START SERVER ================= */
-
+/* ================= START ================= */
 app.listen(3001, () => {
-  console.log("🚀 Proxy running at http://localhost:3001");
-  console.log("🌍 UI: http://localhost:3001");
+  console.log("Proxy running http://localhost:3001");
 });
